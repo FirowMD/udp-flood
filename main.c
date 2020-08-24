@@ -13,15 +13,19 @@
 #include <time.h>
 #include <pcap.h>
 
+#define UDP_HEADER_SIZE 42
 #define UDP_PACKET_SIZE 60
 #define DEVICE_NAME_MAX 100
-#define MAC_ADDRESS_MAX 7
-#define IP_ADDRESS_MAX 5
-#define PORT_MAX 3
+#define MAC_ADDRESS_MAX 6
+#define IP_ADDRESS_MAX 4
+#define PORT_MAX 2
 
 #define printerr( ... ) 																			\
 	fprintf( stderr, "\auflood: " __VA_ARGS__ )
-
+	{
+		printerr( "SetChecksum: unexpected null pointer\n" );
+		return;
+	}
 // Sets command-line arguments for program
 char SetArgv(
 	char **argv, // {argv} of {main} function
@@ -34,6 +38,12 @@ char SetArgv(
 	unsigned short *dest_port, // Destination port
 	unsigned long long *pack_num // Count of packages
 );
+
+// UDP checksum calculating
+void SetChecksum( u_char *packet );
+
+// Shows packet content ( hex table )
+void ShowPacket( u_char *packet );
 
 // Help output
 void ManPrint( void );
@@ -49,8 +59,8 @@ int main( int argc, char *argv[] ){
 	if( argc < 2 ){
 		printf( "Not enough arguments\n" );
 		printf( "Please type:\n" );
-		printf( "\tuflood --help" );
-		printf( "for more information" );
+		printf( "\tuflood --help\n" );
+		printf( "for more information\n" );
 		return -1;
 	}
 
@@ -65,7 +75,7 @@ int main( int argc, char *argv[] ){
 	pcap_if_t *ldevs; // List of devices
 	pcap_if_t *ldv_tmp; // ldevs's iterator
 	char pc_errbuf[ PCAP_ERRBUF_SIZE ]; // Error output
-	u_char pc_pack[ UDP_PACKET_SIZE ]; // Packet
+	u_char pc_pack[ UDP_PACKET_SIZE ] = { 0 }; // Packet
 	char pc_device[ DEVICE_NAME_MAX ]; // Device
 	char pc_src_mac[ MAC_ADDRESS_MAX ]; // Source MAC address
 	char pc_dest_mac[ MAC_ADDRESS_MAX ]; // Destination MAC address
@@ -83,7 +93,7 @@ int main( int argc, char *argv[] ){
 		}
 		printf( "Existing devices:\n" );
 		for( ldv_tmp = ldevs; ldv_tmp; ldv_tmp = ldv_tmp->next ){
-			printf( "%s\n", ldv_tmp->name );
+			printf( "\t%s\n", ldv_tmp->name );
 		}
 		return 0;
 	}
@@ -100,10 +110,6 @@ int main( int argc, char *argv[] ){
 		&pc_pack_num
 	);
 
-	printf( "Enter name of device:\n> " );
-	s_gets( pc_device, DEVICE_NAME_MAX ); 
-
-	printf( "Device: %s\n", pc_device );
 	pc_handle = pcap_open_live( pc_device, BUFSIZ, 1, 0, pc_errbuf ); // 0 - time-out ( in ms )
 
 	if( pc_handle == NULL ){
@@ -117,8 +123,8 @@ int main( int argc, char *argv[] ){
 	}
 
 	// Packet filling
-	sprintf( pc_pack, "%s", pc_dest_mac ); // Destination MAC address
-	strcat( pc_pack, pc_src_mac ); // Source MAC address
+	memcpy( pc_pack, pc_dest_mac, MAC_ADDRESS_MAX ); // Destination MAC address
+	memcpy( pc_pack + MAC_ADDRESS_MAX, pc_src_mac, MAC_ADDRESS_MAX ); // Source MAC address
 	pc_pack[ 12 ] = 0x8; // Protocol ( IP )
 	pc_pack[ 13 ] = 0x00;
 	pc_pack[ 14 ] = 0x45; // Version and internet header length
@@ -131,10 +137,10 @@ int main( int argc, char *argv[] ){
 	pc_pack[ 21 ] = 0;
 	pc_pack[ 22 ] = 0x40; // Time to live
 	pc_pack[ 23 ] = 0x11; // Protocol
-	pc_pack[ 24 ] = 0xBE; // Checksum
-	pc_pack[ 25 ] = 0x6E;
-	strcat( pc_pack, pc_src_addr ); // Source address
-	strcat( pc_pack, pc_dest_addr ); // Destination address
+	pc_pack[ 24 ] = 0; // Checksum
+	pc_pack[ 25 ] = 0;
+	memcpy( pc_pack + 25, pc_src_addr, IP_ADDRESS_MAX ); // Source address
+	memcpy( pc_pack + 25 + IP_ADDRESS_MAX, pc_dest_addr, IP_ADDRESS_MAX ); // Destination address
 
 	// Source port
 	pc_pack[ 34 ] = 0;
@@ -158,15 +164,18 @@ int main( int argc, char *argv[] ){
 
 	pc_pack[ 38 ] = 0; // Length
 	pc_pack[ 39 ] = 0x1A;
-	pc_pack[ 40 ] = 0x7C; // Checksum
-	pc_pack[ 41 ] = 0xC9;
+	pc_pack[ 40 ] = 0; // Checksum
+	pc_pack[ 41 ] = 0;
 
 	// Number of bytes
 	srand( ( unsigned int ) clock() );
 	for( i = 42; i < UDP_PACKET_SIZE; i++ ){
 		pc_pack[ i ] = i % 256;
 	}
-
+	
+	// Packet info
+	ShowPacket( pc_pack );
+	
 	// Packet sending
 	if( pc_pack_num == 0 ){
 		while( 1 ){
@@ -217,14 +226,16 @@ char SetArgv(
 				strncpy( dev, argv[ i + 1 ], DEVICE_NAME_MAX - 1 );
 				dev[ DEVICE_NAME_MAX - 1 ] = 0;
 				i++;
+				printf( "Device: %s\n", dev ); // Debug print
 			} else {
 				printerr( "SetArgv: need argument for \'-d\'\n" );
 				return 0;
 			}
 		} else if( strcmp( argv[ i ], "-sm" ) == 0 ){ // Source MAC address
 			if( argv[ i + 1 ] ){
+				printf( "Source MAC address: %s\n", argv[ i + 1 ] ); // Debug print
 				memset( src_mac, 0, MAC_ADDRESS_MAX );
-				for( v = 0; v < MAC_ADDRESS_MAX - 1; v += 2 ){
+				for( v = 0; v <= MAC_ADDRESS_MAX * 2 + 2; v += 2 ){
 					if( argv[ i + 1 ][ v ] == ':' ){ // Next hex number
 						n += 1;
 						if( n == MAC_ADDRESS_MAX ){
@@ -234,7 +245,7 @@ char SetArgv(
 						v += 1;
 					}
 					// [n] has been introduced for checking correctness of MAC address
-					src_mac[ n ] += s_ihex( &( argv[ i + 1 ][ v ] ) );
+					src_mac[ n ] = s_ihex( &( argv[ i + 1 ][ v ] ) );
 				}
 				if( n != MAC_ADDRESS_MAX - 1 ){
 					printerr( "SetArgv: wrong MAC address ( right form: xx:xx:xx:xx:xx:xx )\n" );
@@ -248,8 +259,9 @@ char SetArgv(
 			}
 		} else if( strcmp( argv[ i ], "-dm" ) == 0 ){ // Destination MAC address
 			if( argv[ i + 1 ] ){
+				printf( "Destination MAC address: %s\n", argv[ i + 1 ] ); // Debug print
 				memset( dest_mac, 0, MAC_ADDRESS_MAX );
-				for( v = 0; v < MAC_ADDRESS_MAX - 1; v += 2 ){
+				for( v = 0; v <= MAC_ADDRESS_MAX * 2 + 2; v += 2 ){
 					if( argv[ i + 1 ][ v ] == ':' ){ // Next hex number
 						n += 1;
 						if( n == MAC_ADDRESS_MAX ){
@@ -259,7 +271,7 @@ char SetArgv(
 						v += 1;
 					}
 					// [n] has been introduced for checking correctness of MAC address
-					dest_mac[ n ] += s_ihex( &( argv[ i + 1 ][ v ] ) );
+					dest_mac[ n ] = s_ihex( &( argv[ i + 1 ][ v ] ) );
 				}
 				if( n != MAC_ADDRESS_MAX - 1 ){
 					printerr( "SetArgv: wrong MAC address ( right form: xx:xx:xx:xx:xx:xx )\n" );
@@ -273,6 +285,7 @@ char SetArgv(
 			}
 		} else if( strcmp( argv[ i ], "-sa" ) == 0 ){ // Source address
 			if( argv[ i + 1 ] ){
+				printf( "Source IP address: %s\n", argv[ i + 1 ] );
 				for( v = 0; argv[ i + 1 ][ v ]; v++ ){
 					if( argv[ i + 1 ][ v ] == '.' ){
 						n += 1;
@@ -299,6 +312,7 @@ char SetArgv(
 			}
 		} else if( strcmp( argv[ i ], "-da" ) == 0 ){
 			if( argv[ i + 1 ] ){
+				printf( "Destination IP address: %s\n", argv[ i + 1 ] ); // Debug print
 				for( v = 0; argv[ i + 1 ][ v ]; v++ ){
 					if( argv[ i + 1 ][ v ] == '.' ){
 						n += 1;
@@ -325,6 +339,7 @@ char SetArgv(
 			}
 		} else if( strcmp( argv[ i ], "-sp" ) == 0 ){
 			if( argv[ i + 1 ] ){
+				printf( "Source port: %s\n", argv[ i + 1 ] ); // Debug print
 				// Decimal port
 				for( v = 0; argv[ i + 1 ][ v ]; v++ ){
 					*src_port += argv[ i + 1 ][ v ] - '0';
@@ -339,6 +354,7 @@ char SetArgv(
 			}
 		} else if( strcmp( argv[ i ], "-dp" ) == 0 ){
 			if( argv[ i + 1 ] ){
+				printf( "Destination port: %s\n", argv[ i + 1 ] ); // Debug print
 				// Decimal port
 				for( v = 0; argv[ i + 1 ][ v ]; v++ ){
 					*dest_port += argv[ i + 1 ][ v ] - '0';
@@ -353,6 +369,7 @@ char SetArgv(
 			}
 		} else if( strcmp( argv[ i ], "-c" ) == 0 ){
 			if( argv[ i + 1 ] ){
+				printf( "Packet count: %s\n", argv[ i + 1 ] ); // Debug print
 				for( v = 0; argv[ i + 1 ][ v ]; v++ ){
 					*pack_num += argv[ i + 1 ][ v ] - '0';
 					if( argv[ i + 1 ][ v + 1 ] != 0 ){
@@ -367,6 +384,39 @@ char SetArgv(
 		}
 	}
 	return 1;
+}
+
+// UDP checksum calculating
+void SetChecksum( u_char *packet ){
+	if( packet == NULL ){
+		printerr( "SetChecksum: unexpected null pointer\n" );
+		return;
+	}
+	u_char *check_pack = ( u_char * ) calloc (
+		// Data section size
+		UDP_PACKET_SIZE - UDP_HEADER_SIZE +
+		160, // Header size for checksum ( Pseudo + Basic )
+		sizeof( u_char )
+	);
+	// [ check_pack ] filling
+	memncpy( check_pack, packet, 4 ); // 4 bytes of IPv4 address
+	memncpy( check_pack + 4, packet, 4 )
+}
+
+// Shows packet content ( hex table )
+void ShowPacket( u_char *packet ){
+	if( packet == NULL ){
+		printerr( "ShowPacket: unexpected null pointer\n" );
+		return;
+	}
+	register unsigned short i;
+	printf( "Packet content:\n" );
+	for( i = 1; i <= UDP_PACKET_SIZE; i++ ){
+		printf( "%.2X\t", packet[ i - 1 ] );
+		if( i % 16 == 0 ){
+			printf( "\n" );
+		}
+	}
 }
 
 // Help output
