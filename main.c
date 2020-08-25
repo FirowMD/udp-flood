@@ -22,10 +22,7 @@
 
 #define printerr( ... ) 																			\
 	fprintf( stderr, "\auflood: " __VA_ARGS__ )
-	{
-		printerr( "SetChecksum: unexpected null pointer\n" );
-		return;
-	}
+
 // Sets command-line arguments for program
 char SetArgv(
 	char **argv, // {argv} of {main} function
@@ -163,14 +160,14 @@ int main( int argc, char *argv[] ){
 	}
 
 	pc_pack[ 38 ] = 0; // Length
-	pc_pack[ 39 ] = 0x1A;
+	pc_pack[ 39 ] = 0x1A; // ( for 18 data bytes )
 	pc_pack[ 40 ] = 0; // Checksum
 	pc_pack[ 41 ] = 0;
 
 	// Number of bytes
 	srand( ( unsigned int ) clock() );
 	for( i = 42; i < UDP_PACKET_SIZE; i++ ){
-		pc_pack[ i ] = i % 256;
+		pc_pack[ i ] = rand() % 256;
 	}
 	
 	// Packet info
@@ -392,15 +389,70 @@ void SetChecksum( u_char *packet ){
 		printerr( "SetChecksum: unexpected null pointer\n" );
 		return;
 	}
+	register int i;
+	short shrt_buf = 0;
+	int i_buf = 0;
 	u_char *check_pack = ( u_char * ) calloc (
 		// Data section size
 		UDP_PACKET_SIZE - UDP_HEADER_SIZE +
 		160, // Header size for checksum ( Pseudo + Basic )
 		sizeof( u_char )
 	);
+
 	// [ check_pack ] filling
-	memncpy( check_pack, packet, 4 ); // 4 bytes of IPv4 address
-	memncpy( check_pack + 4, packet, 4 )
+	memncpy( check_pack, packet + 25, IP_ADDRESS_MAX ); // 4 bytes of IPv4 address // Source IP
+	memncpy( check_pack + IP_ADDRESS_MAX, packet + 25 + IP_ADDRESS_MAX, IP_ADDRESS_MAX ); // Destination IP
+	check_pack[ 8 ] = 0; // 0s
+	check_pack[ 9 ] = packet[ 23 ]; // Protocol ( UDP )
+	check_pack[ 10 ] = 0; // UDP length ( 2 bytes ) // Calculates later
+	check_pack[ 11 ] = 0;
+	check_pack[ 12 ] = packet[ 34 ]; // Source port ( 2 bytes )
+	check_pack[ 13 ] = packet[ 35 ];
+	check_pack[ 14 ] = packet[ 36 ]; // Destination port ( 2 bytes )
+	check_pack[ 15 ] = packet[ 37 ];
+	check_pack[ 16 ] = packet[ 38 ]; // Length ( 2 bytes )
+	check_pack[ 17 ] = packet[ 39 ];
+	check_pack[ 18 ] = 0; // Checksum // 0s ( 2 bytes )
+	check_pack[ 19 ] = 0;
+	for( i = 0; i < UDP_PACKET_SIZE - 42; i++ ){ // Data bytes
+		check_pack[ 20 + i ] = check_pack[ 42 + i ];
+	}
+
+	// Length
+	char st_buf[] = { check_pack[ 17 ], check_pack[ 16 ] };
+	memcpy( &shrt_buf, st_buf, 2 );
+	shrt_buf = atoi( st_buf ) + 12;
+	memcpy( st_buf, &shrt_buf, 2 );
+	check_pack[ 10 ] = st_buf[ 1 ];
+	check_pack[ 11 ] = st_buf[ 0 ];
+	
+	// Checksum
+	for( i = 0; i < UDP_PACKET_SIZE + 12; i += 2 ){
+		st_buf[ 0 ] = check_pack[ i + 1 ];
+		st_buf[ 1 ] = check_pack[ i ];
+		memcpy( &shrt_buf, st_buf, 2 );
+		i_buf += shrt_buf;
+	}
+
+	union {
+		int i;
+		struct {
+			short right;
+			short left;
+		} part;
+	} un_buf;
+	un_buf.i = i_buf;
+	un_buf.part.right += un_buf.part.left;
+	un_buf.part.right = ~un_buf.part.right;
+
+	// Checksum entering
+	union {
+		short data;
+		char c[ 2 ];
+	} un_sum;
+	un_sum.data = un_buf.part.right;
+	packet[ 40 ] = un_sum.c[ 1 ];
+	packet[ 41 ] = un_sum.c[ 0 ];
 }
 
 // Shows packet content ( hex table )
