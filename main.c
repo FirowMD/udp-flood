@@ -136,8 +136,8 @@ int main( int argc, char *argv[] ){
 	pc_pack[ 23 ] = 0x11; // Protocol
 	pc_pack[ 24 ] = 0; // Checksum
 	pc_pack[ 25 ] = 0;
-	memcpy( pc_pack + 25, pc_src_addr, IP_ADDRESS_MAX ); // Source address
-	memcpy( pc_pack + 25 + IP_ADDRESS_MAX, pc_dest_addr, IP_ADDRESS_MAX ); // Destination address
+	memcpy( pc_pack + 26, pc_src_addr, IP_ADDRESS_MAX ); // Source address
+	memcpy( pc_pack + 26 + IP_ADDRESS_MAX, pc_dest_addr, IP_ADDRESS_MAX ); // Destination address
 
 	// Source port
 	pc_pack[ 34 ] = 0;
@@ -392,6 +392,19 @@ void SetChecksum( u_char *packet ){
 	register int i;
 	short shrt_buf = 0;
 	int i_buf = 0;
+	int i_buf2 = 0;
+	char st_buf[ 2 ] = { 0 };
+	union {
+		int i;
+		struct {
+			short right;
+			short left;
+		} part;
+	} un_buf = { 0 };
+	union {
+		short data;
+		char c[ 2 ];
+	} un_c2 = { 0 };
 	u_char *check_pack = ( u_char * ) calloc (
 		// Data section size
 		UDP_PACKET_SIZE - UDP_HEADER_SIZE +
@@ -399,9 +412,14 @@ void SetChecksum( u_char *packet ){
 		sizeof( u_char )
 	);
 
+	if( check_pack == NULL ){
+		printerr( "SetChecksum: out of memory\n" );
+		return;
+	}
+
 	// [ check_pack ] filling
-	memncpy( check_pack, packet + 25, IP_ADDRESS_MAX ); // 4 bytes of IPv4 address // Source IP
-	memncpy( check_pack + IP_ADDRESS_MAX, packet + 25 + IP_ADDRESS_MAX, IP_ADDRESS_MAX ); // Destination IP
+	memcpy( check_pack, packet + 26, IP_ADDRESS_MAX ); // 4 bytes of IPv4 address // Source IP
+	memcpy( check_pack + IP_ADDRESS_MAX, packet + 26 + IP_ADDRESS_MAX, IP_ADDRESS_MAX ); // Destination IP
 	check_pack[ 8 ] = 0; // 0s
 	check_pack[ 9 ] = packet[ 23 ]; // Protocol ( UDP )
 	check_pack[ 10 ] = 0; // UDP length ( 2 bytes ) // Calculates later
@@ -419,40 +437,34 @@ void SetChecksum( u_char *packet ){
 	}
 
 	// Length
-	char st_buf[] = { check_pack[ 17 ], check_pack[ 16 ] };
-	memcpy( &shrt_buf, st_buf, 2 );
-	shrt_buf = atoi( st_buf ) + 12;
-	memcpy( st_buf, &shrt_buf, 2 );
-	check_pack[ 10 ] = st_buf[ 1 ];
-	check_pack[ 11 ] = st_buf[ 0 ];
+	un_c2.c[ 0 ] = check_pack[ 17 ];
+	un_c2.c[ 1 ] = check_pack[ 16 ];
+	shrt_buf = un_c2.data;
+	check_pack[ 10 ] = un_c2.c[ 1 ];
+	check_pack[ 11 ] = un_c2.c[ 0 ];
 	
 	// Checksum
 	for( i = 0; i < UDP_PACKET_SIZE + 12; i += 2 ){
 		st_buf[ 0 ] = check_pack[ i + 1 ];
 		st_buf[ 1 ] = check_pack[ i ];
 		memcpy( &shrt_buf, st_buf, 2 );
+		i_buf2 = i_buf;
 		i_buf += shrt_buf;
+		if( i_buf < i_buf2 ){
+			i_buf += 0x10000;
+		}
 	}
 
-	union {
-		int i;
-		struct {
-			short right;
-			short left;
-		} part;
-	} un_buf;
 	un_buf.i = i_buf;
 	un_buf.part.right += un_buf.part.left;
 	un_buf.part.right = ~un_buf.part.right;
 
 	// Checksum entering
-	union {
-		short data;
-		char c[ 2 ];
-	} un_sum;
-	un_sum.data = un_buf.part.right;
-	packet[ 40 ] = un_sum.c[ 1 ];
-	packet[ 41 ] = un_sum.c[ 0 ];
+	un_c2.data = un_buf.part.right;
+	packet[ 40 ] = un_c2.c[ 1 ];
+	packet[ 41 ] = un_c2.c[ 0 ];
+
+	free( check_pack );
 }
 
 // Shows packet content ( hex table )
