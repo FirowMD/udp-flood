@@ -1,6 +1,6 @@
-# udp-flood
-*UFLOOD v.1.0*
-UDP-flood program
+# UDP-flood
+*UFLOOD v.1.0*.
+UDP-flood program.
 Works only on Linux
 
 # Features:
