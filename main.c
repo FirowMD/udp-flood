@@ -36,8 +36,11 @@ char SetArgv(
 	unsigned long long *pack_num // Count of packages
 );
 
+// IP checksum calculating
+void SetChecksumIP( u_char *packet );
+
 // UDP checksum calculating
-void SetChecksum( u_char *packet );
+void SetChecksumUDP( u_char *packet );
 
 // Shows packet content ( hex table )
 void ShowPacket( u_char *packet );
@@ -115,7 +118,7 @@ int main( int argc, char *argv[] ){
 	}
 
 	if( pcap_datalink( pc_handle ) != DLT_EN10MB ){
-		printerr( "Device %s doesn't provide Ethernet headers -not  supported\n", pc_device );
+		printerr( "Device %s doesn't provide Ethernet headers -not supported\n", pc_device );
 		return 3;
 	}
 
@@ -138,26 +141,22 @@ int main( int argc, char *argv[] ){
 	pc_pack[ 25 ] = 0;
 	memcpy( pc_pack + 26, pc_src_addr, IP_ADDRESS_MAX ); // Source address
 	memcpy( pc_pack + 26 + IP_ADDRESS_MAX, pc_dest_addr, IP_ADDRESS_MAX ); // Destination address
-
+	
+	// Port writing
+	union {
+		short port;
+		u_char part[ 2 ];
+	} un_port;
 	// Source port
 	pc_pack[ 34 ] = 0;
-	for( i = 8; i < sizeof( short ) * 8; i++ ){
-		pc_pack[ 34 ] |= pc_src_port << i;
-	}
-	pc_pack[ 35 ] = 0;
-	for( i = 0; i < 8; i++ ){
-		pc_pack[ 35 ] |= pc_src_port << i;
-	}
+	un_port.port = pc_src_port;
+	pc_pack[ 34 ] = un_port.part[ 1 ];
+	pc_pack[ 35 ] = un_port.part[ 0 ];
 
 	// Destination port
-	pc_pack[ 36 ] = 0;
-	for( i = 8; i < sizeof( short ) * 8; i++ ){
-		pc_pack[ 36 ] |= pc_dest_port << i;
-	}
-	pc_pack[ 37 ] = 0;
-	for( i = 0; i < 8; i++ ){
-		pc_pack[ 37 ] |= pc_dest_port << i;
-	}
+	un_port.port = pc_dest_port;
+	pc_pack[ 36 ] = un_port.part[ 1 ];
+	pc_pack[ 37 ] = un_port.part[ 0 ];
 
 	pc_pack[ 38 ] = 0; // Length
 	pc_pack[ 39 ] = 0x1A; // ( for 18 data bytes )
@@ -165,10 +164,14 @@ int main( int argc, char *argv[] ){
 	pc_pack[ 41 ] = 0;
 
 	// Number of bytes
-	srand( ( unsigned int ) clock() );
-	for( i = 42; i < UDP_PACKET_SIZE; i++ ){
-		pc_pack[ i ] = rand() % 256;
-	}
+	// srand( ( unsigned int ) clock() );
+	// for( i = 42; i < UDP_PACKET_SIZE; i++ ){
+	// 	pc_pack[ i ] = rand() % 256;
+	// }
+	
+	// Checksum setting
+	SetChecksumIP( pc_pack );
+	SetChecksumUDP( pc_pack );
 	
 	// Packet info
 	ShowPacket( pc_pack );
@@ -383,10 +386,56 @@ char SetArgv(
 	return 1;
 }
 
-// UDP checksum calculating
-void SetChecksum( u_char *packet ){
+// IP checksum calculating
+void SetChecksumIP( u_char *packet ){
 	if( packet == NULL ){
-		printerr( "SetChecksum: unexpected null pointer\n" );
+		printerr( "SetChecksumIP: unexpected null pointer\n" );
+		return;
+	}
+	register int i;
+	int i_buf = 0;
+	int i_buf2 = 0;
+	union {
+		short data;
+		u_char c[ 2 ];
+	} un_c2;
+	union {
+		int i;
+		struct {
+			short right;
+			short left;
+		} part;
+	} un_buf;
+	
+	for( i = 14; i < 34; i += 2 ){
+		un_c2.c[ 1 ] = packet[ i ];
+		un_c2.c[ 0 ] = packet[ i + 1 ];
+		i_buf2 = i_buf;
+		i_buf += un_c2.data;
+		if( i_buf < i_buf2 ){
+			i_buf += 0x10000;
+		}
+	}
+	
+	un_buf.i = i_buf;
+	while( un_buf.part.left != -1 ){
+		i_buf = un_buf.part.right;
+		i_buf2 = un_buf.part.left;
+		i_buf += i_buf2;
+		un_buf.i = i_buf;
+	}
+	un_buf.part.right = ~un_buf.part.right;
+
+	// Checksum entering
+	un_c2.data = un_buf.part.right;
+	packet[ 24 ] = un_c2.c[ 1 ];
+	packet[ 25 ] = un_c2.c[ 0 ];
+}
+
+// UDP checksum calculating
+void SetChecksumUDP( u_char *packet ){
+	if( packet == NULL ){
+		printerr( "SetChecksumUDP: unexpected null pointer\n" );
 		return;
 	}
 	register int i;
@@ -413,7 +462,7 @@ void SetChecksum( u_char *packet ){
 	);
 
 	if( check_pack == NULL ){
-		printerr( "SetChecksum: out of memory\n" );
+		printerr( "SetChecksumUDP: out of memory\n" );
 		return;
 	}
 
@@ -476,7 +525,11 @@ void ShowPacket( u_char *packet ){
 	register unsigned short i;
 	printf( "Packet content:\n" );
 	for( i = 1; i <= UDP_PACKET_SIZE; i++ ){
-		printf( "%.2X\t", packet[ i - 1 ] );
+		if( i - 1 == 24 || i - 1 == 25 || i - 1 == 40 || i - 1 == 41 ){
+			printf( "[%2.2X]\t", packet[ i - 1 ] );
+		} else {
+			printf( "%.2X\t", packet[ i - 1 ] );
+		}
 		if( i % 16 == 0 ){
 			printf( "\n" );
 		}
