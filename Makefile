@@ -28,7 +28,7 @@ debug:
 
 # Release version
 out:
-	$(COMPILER) $(SOURCES) $(LDFLAGS) -o $(EXECUTABLE)
+	$(COMPILER) $(SOURCES) $(LFLAGS) -o $(EXECUTABLE)
 
 # Debug program
 gdb:
