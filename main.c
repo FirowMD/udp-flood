@@ -164,10 +164,10 @@ int main( int argc, char *argv[] ){
 	pc_pack[ 41 ] = 0;
 
 	// Number of bytes
-	// srand( ( unsigned int ) clock() );
-	// for( i = 42; i < UDP_PACKET_SIZE; i++ ){
-	// 	pc_pack[ i ] = rand() % 256;
-	// }
+	srand( ( unsigned int ) clock() );
+	for( i = 42; i < UDP_PACKET_SIZE; i++ ){
+		pc_pack[ i ] = 0;
+	}
 	
 	// Checksum setting
 	SetChecksumIP( pc_pack );
@@ -481,8 +481,8 @@ void SetChecksumUDP( u_char *packet ){
 	check_pack[ 17 ] = packet[ 39 ];
 	check_pack[ 18 ] = 0; // Checksum // 0s ( 2 bytes )
 	check_pack[ 19 ] = 0;
-	for( i = 0; i < UDP_PACKET_SIZE - 42; i++ ){ // Data bytes
-		check_pack[ 20 + i ] = check_pack[ 42 + i ];
+	for( i = 0; i < UDP_PACKET_SIZE - UDP_HEADER_SIZE; i++ ){ // Data bytes
+		check_pack[ 20 + i ] = check_pack[ UDP_HEADER_SIZE + i ];
 	}
 
 	// Length
@@ -526,7 +526,7 @@ void ShowPacket( u_char *packet ){
 	printf( "Packet content:\n" );
 	for( i = 1; i <= UDP_PACKET_SIZE; i++ ){
 		if( i - 1 == 24 || i - 1 == 25 || i - 1 == 40 || i - 1 == 41 ){
-			printf( "[%2.2X]\t", packet[ i - 1 ] );
+			printf( "[%.2X]\t", packet[ i - 1 ] );
 		} else {
 			printf( "%.2X\t", packet[ i - 1 ] );
 		}
@@ -534,6 +534,7 @@ void ShowPacket( u_char *packet ){
 			printf( "\n" );
 		}
 	}
+	printf( "\n" );
 }
 
 // Help output
