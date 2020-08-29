@@ -33,7 +33,8 @@ char SetArgv(
 	char *dest_addr, // Destination address
 	unsigned short *src_port, // Source port
 	unsigned short *dest_port, // Destination port
-	unsigned long long *pack_num // Count of packages
+	unsigned long long *pack_num, // Count of packages
+	unsigned long long *pack_delay // Delay between packets
 );
 
 // IP checksum calculating
@@ -84,6 +85,8 @@ int main( int argc, char *argv[] ){
 	unsigned short pc_src_port; // Source port
 	unsigned short pc_dest_port; // Destination port
 	unsigned long long pc_pack_num; // Packet number
+	unsigned long long pc_delay; // Delay between packets
+	unsigned long long pc_delay_start; // Delay between packets
 
 	// List of devices
 	if( strcmp( argv[ 1 ], "--devlist" ) == 0 ){
@@ -98,17 +101,22 @@ int main( int argc, char *argv[] ){
 		return 0;
 	}
 
-	SetArgv(
-		argv,
-		pc_device,
-		pc_src_mac,
-		pc_dest_mac,
-		pc_src_addr,
-		pc_dest_addr,
-		&pc_src_port,
-		&pc_dest_port,
-		&pc_pack_num
-	);
+	if( !SetArgv(
+			argv,
+			pc_device,
+			pc_src_mac,
+			pc_dest_mac,
+			pc_src_addr,
+			pc_dest_addr,
+			&pc_src_port,
+			&pc_dest_port,
+			&pc_pack_num,
+			&pc_delay
+		)
+	){
+		printerr( "Program crashed\n" );
+		return 1;
+	}
 
 	pc_handle = pcap_open_live( pc_device, BUFSIZ, 1, 0, pc_errbuf ); // 0 - time-out ( in ms )
 
@@ -179,10 +187,18 @@ int main( int argc, char *argv[] ){
 	// Packet sending
 	if( pc_pack_num == 0 ){
 		while( 1 ){
+			pc_delay_start = clock();
+			while( clock() <= pc_delay_start + pc_delay ){
+				continue;
+			}
 			pcap_sendpacket( pc_handle, pc_pack, UDP_PACKET_SIZE );
 		}
 	} else {
 		while( pc_pack_num ){
+			pc_delay_start = clock();
+			while( clock() <= pc_delay_start + pc_delay ){
+				continue;
+			}
 			pcap_sendpacket( pc_handle, pc_pack, UDP_PACKET_SIZE );
 			pc_pack_num -= 1;
 		}
@@ -201,7 +217,8 @@ char SetArgv(
 	char *dest_addr, // Destination address
 	unsigned short *src_port, // Source port
 	unsigned short *dest_port, // Destination port
-	unsigned long long *pack_num // Count of packages
+	unsigned long long *pack_num, // Count of packages
+	unsigned long long *pack_delay // Delay between packets
 ){
 	if(
 		argv == NULL ||
@@ -210,7 +227,11 @@ char SetArgv(
 		src_mac == NULL ||
 		dest_mac == NULL ||
 		src_addr == NULL ||
-		dest_addr == NULL
+		dest_addr == NULL ||
+		src_port == NULL ||
+		dest_port == NULL ||
+		pack_num == NULL ||
+		pack_delay == NULL
 	){
 		printerr( "SetArgv: unexpected null pointer\n" );
 		return 0;
@@ -381,6 +402,22 @@ char SetArgv(
 				printerr( "SetArgv: need argument for \'-c\'\n" );
 				return 0;
 			}
+		} else if( strcmp( argv[ i ], "-cd" ) == 0 ){
+			if( argv[ i + 1 ] ){
+				printf( "Delay: %s\n", argv[ i + 1 ] ); // Debug print
+				for( v = 0; argv[ i + 1 ][ v ]; v++ ){
+					*pack_delay += argv[ i + 1 ][ v ] - '0';
+					if( argv[ i + 1 ][ v + 1 ] != 0 ){
+						*pack_delay *= 10;
+					}
+				}
+				i++;
+			} else {
+				printerr( "SetArgv: need argument for \'-cd\'\n" );
+				return 0;
+			}
+		} else {
+			printerr( "SetArgv: unknown argument %s\n", argv[ i ] );
 		}
 	}
 	return 1;
@@ -460,7 +497,6 @@ void SetChecksumUDP( u_char *packet ){
 		160, // Header size for checksum ( Pseudo + Basic )
 		sizeof( u_char )
 	);
-
 	if( check_pack == NULL ){
 		printerr( "SetChecksumUDP: out of memory\n" );
 		return;
@@ -552,6 +588,7 @@ void ManPrint( void ){
 	printf( "\t-sp [ PORT ] - add source port\n" );
 	printf( "\t-dp [ PORT ] - add destination port\n" );
 	printf( "\t-c [ NUMBER ] - change packet count ( default: infinity )\n" );
+	printf( "\t-cd [ NUMBER ] - change delay ( in ms ) between packets ( default: 0 )\n" );
 }
 
 // Prata's func to get string
